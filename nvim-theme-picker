@@ -1,0 +1,202 @@
+
+#!/bin/bash
+
+set -e
+
+echo "Detecting OS..."
+
+if command -v pacman &> /dev/null; then
+  echo "Installing dependencies for Arch based systems..."
+  sudo pacman -Sy --noconfirm neovim git curl unzip --needed
+elif command -v apt &> /dev/null; then
+  echo "Installing dependencies for Debian based systems..."
+  sudo apt update
+  sudo apt install -y neovim git curl unzip
+else
+  echo "System not supported. Manually Install Neovim, Git and Curl."
+  exit 1
+fi
+
+# Backup function
+backup_nvim_config() {
+  local backup_dir="$HOME/.config/nvim_backup-$(date +%Y%m%d-%H%M%S)"
+  echo "~/.config/nvim already exists"
+  read -p "Would you want to create a backup before overwriting? (s/N): " -r respuesta
+  if [[ "$respuesta" =~ ^[Ss]$ ]]; then
+    echo "Creating a backup in: $backup_dir"
+    mv ~/.config/nvim "$backup_dir"
+  else
+    echo "A backup wasn't done. Existing .config will be overwritten."
+    rm -rf ~/.config/nvim
+  fi
+}
+
+# If ~/.config/nvim already exists → ask
+if [ -d "$HOME/.config/nvim" ]; then
+  backup_nvim_config
+fi
+
+echo "Creating config dir..."
+mkdir -p ~/.config/nvim/lua/plugins
+
+echo "Downloading Lazy.nvim..."
+git clone --filter=blob:none https://github.com/folke/lazy.nvim.git \
+  ~/.local/share/nvim/lazy/lazy.nvim
+
+echo "Writing base config..."
+
+# init.lua
+cat > ~/.config/nvim/init.lua <<'EOF'
+vim.g.mapleader = " "
+
+require("lazy").setup("plugins")
+
+vim.g.colorscheme = "catppuccin"
+vim.o.background = "dark"
+vim.cmd.colorscheme(vim.g.colorscheme)
+
+local themes = {
+  "catppuccin",
+  "gruvbox",
+  "tokyonight",
+  "everforest",
+  "rose-pine",
+}
+
+local function apply_theme(theme)
+  pcall(function()
+    vim.o.background = "dark"
+    vim.cmd.colorscheme(theme)
+  end)
+end
+
+-- Without preview
+local function theme_picker()
+  local pickers = require("telescope.pickers")
+  local finders = require("telescope.finders")
+  local actions = require("telescope.actions")
+  local action_state = require("telescope.actions.state")
+  local conf = require("telescope.config").values
+
+  pickers.new({}, {
+    prompt_title = "Select Theme",
+    finder = finders.new_table({ results = themes }),
+    sorter = conf.generic_sorter({}),
+    attach_mappings = function(_, _)
+      actions.select_default:replace(function()
+        local selection = action_state.get_selected_entry()
+        apply_theme(selection[1])
+      end)
+      return true
+    end,
+  }):find()
+end
+
+-- With preview hover
+local function theme_preview()
+  local pickers = require("telescope.pickers")
+  local finders = require("telescope.finders")
+  local actions = require("telescope.actions")
+  local action_state = require("telescope.actions.state")
+  local conf = require("telescope.config").values
+
+  local original_theme = vim.g.colorscheme or "default"
+
+  pickers.new({}, {
+    prompt_title = "Preview Theme",
+    finder = finders.new_table({ results = themes }),
+    sorter = conf.generic_sorter({}),
+    previewer = {
+      preview = function(_, entry)
+        if entry and entry.value then
+          apply_theme(entry.value)
+        end
+      end,
+    },
+    attach_mappings = function(_, map)
+      actions.select_default:replace(function()
+        local selection = action_state.get_selected_entry()
+        apply_theme(selection[1])
+      end)
+      map("i", "<esc>", function()
+        apply_theme(original_theme)
+        vim.cmd.stopinsert()
+      end)
+      map("n", "<esc>", function()
+        apply_theme(original_theme)
+        vim.cmd.stopinsert()
+      end)
+      return true
+    end,
+  }):find()
+end
+
+vim.api.nvim_create_user_command("ThemePicker", theme_picker, {})
+vim.api.nvim_create_user_command("ThemePreview", theme_preview, {})
+
+vim.keymap.set("n", "<leader>ut", ":ThemePicker<CR>", { desc = "Cambiar tema (sin preview)" })
+vim.keymap.set("n", "<leader>up", ":ThemePreview<CR>", { desc = "Previsualizar temas en vivo" })
+EOF
+
+# plugins/colors.lua
+cat > ~/.config/nvim/lua/plugins/colors.lua <<'EOF'
+return {
+  {
+    "catppuccin/nvim",
+    name = "catppuccin",
+    priority = 1000,
+    lazy = false,
+    config = function()
+      require("catppuccin").setup({
+        flavour = "mocha",
+        transparent_background = true,
+        integrations = {
+          cmp = true,
+          gitsigns = true,
+          nvimtree = true,
+          telescope = true,
+          treesitter = true,
+        },
+      })
+    end,
+  },
+
+  {
+    "morhetz/gruvbox",
+    priority = 1000,
+    lazy = false,
+  },
+
+  {
+    "folke/tokyonight.nvim",
+    priority = 1000,
+    lazy = false,
+  },
+
+  {
+    "sainnhe/everforest",
+    priority = 1000,
+    lazy = false,
+  },
+
+  {
+    "rose-pine/neovim",
+    name = "rose-pine",
+    priority = 1000,
+    lazy = false,
+    config = function()
+      require("rose-pine").setup({
+        disable_background = true,
+      })
+    end,
+  },
+
+  {
+    "nvim-telescope/telescope.nvim",
+    dependencies = { "nvim-lua/plenary.nvim" },
+  },
+}
+EOF
+
+echo "✅ All done. Open Neovim and run :Lazy sync to install the plugins."
+echo "👉 Use :ThemePicker to change themes without preview o :ThemePreview to live preview themes."
