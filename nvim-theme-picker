@@ -6,49 +6,48 @@ set -e
 echo "Detecting OS..."
 
 if command -v pacman &> /dev/null; then
-  echo "Installing dependencies for Arch based systems..."
-  sudo pacman -Sy --noconfirm neovim git curl unzip --needed
+  echo "[+] Installing dependencies in Arch based system..."
+  sudo pacman -Sy --noconfirm neovim git curl unzip
 elif command -v apt &> /dev/null; then
-  echo "Installing dependencies for Debian based systems..."
+  echo "Installing dependences in Debian based system..."
   sudo apt update
   sudo apt install -y neovim git curl unzip
 else
-  echo "System not supported. Manually Install Neovim, Git and Curl."
+  echo "System is not supported. Install Neovim, Git and Curl manually."
   exit 1
 fi
 
-# Backup function
+# Backup in ~/.config/nvim
 backup_nvim_config() {
   local backup_dir="$HOME/.config/nvim_backup-$(date +%Y%m%d-%H%M%S)"
   echo "~/.config/nvim already exists"
-  read -p "Would you want to create a backup before overwriting? (s/N): " -r respuesta
+  read -p "Would you want to create a backup of existing config before overwritting? (y/N): " -r respuesta
   if [[ "$respuesta" =~ ^[Ss]$ ]]; then
-    echo "Creating a backup in: $backup_dir"
+    echo "Creating backup in: $backup_dir"
     mv ~/.config/nvim "$backup_dir"
   else
-    echo "A backup wasn't done. Existing .config will be overwritten."
+    echo "A backup was not requested. Existing configuration will be overwritten."
     rm -rf ~/.config/nvim
   fi
 }
 
-# If ~/.config/nvim already exists → ask
 if [ -d "$HOME/.config/nvim" ]; then
   backup_nvim_config
 fi
 
-echo "Creating config dir..."
+echo "Building config structure..."
 mkdir -p ~/.config/nvim/lua/plugins
 
-echo "Downloading Lazy.nvim..."
+echo "Cloning Lazy.nvim..."
 git clone --filter=blob:none https://github.com/folke/lazy.nvim.git \
   ~/.local/share/nvim/lazy/lazy.nvim
 
-echo "Writing base config..."
+echo "Generating init.lua..."
 
-# init.lua
 cat > ~/.config/nvim/init.lua <<'EOF'
 vim.g.mapleader = " "
 
+vim.opt.rtp:prepend(vim.fn.stdpath("data") .. "/lazy/lazy.nvim")
 require("lazy").setup("plugins")
 
 vim.g.colorscheme = "catppuccin"
@@ -70,7 +69,7 @@ local function apply_theme(theme)
   end)
 end
 
--- Without preview
+-- Normal picker (without preview)
 local function theme_picker()
   local pickers = require("telescope.pickers")
   local finders = require("telescope.finders")
@@ -86,13 +85,14 @@ local function theme_picker()
       actions.select_default:replace(function()
         local selection = action_state.get_selected_entry()
         apply_theme(selection[1])
+        vim.g.colorscheme = selection[1]
       end)
       return true
     end,
   }):find()
 end
 
--- With preview hover
+-- Picker with hover preview
 local function theme_preview()
   local pickers = require("telescope.pickers")
   local finders = require("telescope.finders")
@@ -100,33 +100,42 @@ local function theme_preview()
   local action_state = require("telescope.actions.state")
   local conf = require("telescope.config").values
 
-  local original_theme = vim.g.colorscheme or "default"
+  local current_theme = vim.g.colorscheme or "default"
+  local last_previewed = current_theme
 
   pickers.new({}, {
     prompt_title = "Preview Theme",
     finder = finders.new_table({ results = themes }),
     sorter = conf.generic_sorter({}),
-    previewer = {
-      preview = function(_, entry)
-        if entry and entry.value then
-          apply_theme(entry.value)
-        end
-      end,
-    },
+    previewer = false, -- desactivar preview real
     attach_mappings = function(_, map)
       actions.select_default:replace(function()
         local selection = action_state.get_selected_entry()
         apply_theme(selection[1])
+        vim.g.colorscheme = selection[1]
       end)
+
       map("i", "<esc>", function()
-        apply_theme(original_theme)
+        apply_theme(current_theme)
         vim.cmd.stopinsert()
       end)
       map("n", "<esc>", function()
-        apply_theme(original_theme)
-        vim.cmd.stopinsert()
+        apply_theme(current_theme)
       end)
+
       return true
+    end,
+
+    on_input_filter_cb = function(prompt)
+      local entry = prompt and prompt:lower()
+      for _, theme in ipairs(themes) do
+        if entry == theme:sub(1, #entry) and theme ~= last_previewed then
+          last_previewed = theme
+          apply_theme(theme)
+          break
+        end
+      end
+      return prompt
     end,
   }):find()
 end
@@ -134,11 +143,12 @@ end
 vim.api.nvim_create_user_command("ThemePicker", theme_picker, {})
 vim.api.nvim_create_user_command("ThemePreview", theme_preview, {})
 
-vim.keymap.set("n", "<leader>ut", ":ThemePicker<CR>", { desc = "Cambiar tema (sin preview)" })
+vim.keymap.set("n", "<leader>ut", ":ThemePicker<CR>", { desc = "Cambiar tema sin preview" })
 vim.keymap.set("n", "<leader>up", ":ThemePreview<CR>", { desc = "Previsualizar temas en vivo" })
 EOF
 
-# plugins/colors.lua
+echo "[+] Generando plugins/colors.lua..."
+
 cat > ~/.config/nvim/lua/plugins/colors.lua <<'EOF'
 return {
   {
@@ -198,5 +208,6 @@ return {
 }
 EOF
 
-echo "✅ All done. Open Neovim and run :Lazy sync to install the plugins."
-echo "👉 Use :ThemePicker to change themes without preview o :ThemePreview to live preview themes."
+echo "[✅] Instalación completed."
+echo "[🚀] Open Neovim and run :Lazy sync to install all plugins."
+echo "[🎨] Usa :ThemePicker to change theme or :ThemePreview to preview themes."
