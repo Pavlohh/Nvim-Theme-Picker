@@ -6,27 +6,27 @@ set -e
 echo "Detecting OS..."
 
 if command -v pacman &> /dev/null; then
-  echo "[+] Installing dependencies in Arch based system..."
+  echo "Installing dependencies in Arch based system..."
   sudo pacman -Sy --noconfirm neovim git curl unzip
 elif command -v apt &> /dev/null; then
-  echo "Installing dependences in Debian based system..."
+  echo "Installing dependencies in Debian based system..."
   sudo apt update
   sudo apt install -y neovim git curl unzip
 else
-  echo "System is not supported. Install Neovim, Git and Curl manually."
+  echo "System is not supported. Install Neovim, Git, and Curl manually."
   exit 1
 fi
 
-# Backup in ~/.config/nvim
+# Backup if ~/.config/nvim exists
 backup_nvim_config() {
   local backup_dir="$HOME/.config/nvim_backup-$(date +%Y%m%d-%H%M%S)"
   echo "~/.config/nvim already exists"
-  read -p "Would you want to create a backup of existing config before overwritting? (y/N): " -r respuesta
-  if [[ "$respuesta" =~ ^[Ss]$ ]]; then
+  read -p "Would you like to create a backup of existing config before overwriting? (y/N): " -r respuesta
+  if [[ "$respuesta" =~ ^[YySs]$ ]]; then
     echo "Creating backup in: $backup_dir"
     mv ~/.config/nvim "$backup_dir"
   else
-    echo "A backup was not requested. Existing configuration will be overwritten."
+    echo "Overwriting existing configuration..."
     rm -rf ~/.config/nvim
   fi
 }
@@ -38,12 +38,16 @@ fi
 echo "Building config structure..."
 mkdir -p ~/.config/nvim/lua/plugins
 
+# Clone Lazy.nvim safely
+LZ_PATH="$HOME/.local/share/nvim/lazy/lazy.nvim"
 echo "Cloning Lazy.nvim..."
-git clone --filter=blob:none https://github.com/folke/lazy.nvim.git \
-  ~/.local/share/nvim/lazy/lazy.nvim
+if [ -d "$LZ_PATH" ]; then
+  echo "[!] Lazy.nvim already exists. Removing old version..."
+  rm -rf "$LZ_PATH"
+fi
+git clone --filter=blob:none https://github.com/folke/lazy.nvim.git "$LZ_PATH"
 
-echo "Generating init.lua..."
-
+# Write init.lua
 cat > ~/.config/nvim/init.lua <<'EOF'
 vim.g.mapleader = " "
 
@@ -69,7 +73,6 @@ local function apply_theme(theme)
   end)
 end
 
--- Normal picker (without preview)
 local function theme_picker()
   local pickers = require("telescope.pickers")
   local finders = require("telescope.finders")
@@ -92,7 +95,6 @@ local function theme_picker()
   }):find()
 end
 
--- Picker with hover preview
 local function theme_preview()
   local pickers = require("telescope.pickers")
   local finders = require("telescope.finders")
@@ -103,25 +105,33 @@ local function theme_preview()
   local current_theme = vim.g.colorscheme or "default"
   local last_previewed = current_theme
 
+  local function restore_theme()
+    vim.schedule(function()
+      apply_theme(current_theme)
+    end)
+  end
+
   pickers.new({}, {
     prompt_title = "Preview Theme",
     finder = finders.new_table({ results = themes }),
     sorter = conf.generic_sorter({}),
-    previewer = false, -- desactivar preview real
-    attach_mappings = function(_, map)
+    previewer = false,
+    attach_mappings = function(prompt_bufnr, map)
+      local close_and_restore = function()
+        restore_theme()
+        actions.close(prompt_bufnr)
+      end
+
       actions.select_default:replace(function()
         local selection = action_state.get_selected_entry()
         apply_theme(selection[1])
         vim.g.colorscheme = selection[1]
+        actions.close(prompt_bufnr)
       end)
 
-      map("i", "<esc>", function()
-        apply_theme(current_theme)
-        vim.cmd.stopinsert()
-      end)
-      map("n", "<esc>", function()
-        apply_theme(current_theme)
-      end)
+      map("i", "<esc>", close_and_restore)
+      map("n", "q", close_and_restore)
+      map("n", "<esc>", close_and_restore)
 
       return true
     end,
@@ -147,8 +157,7 @@ vim.keymap.set("n", "<leader>ut", ":ThemePicker<CR>", { desc = "Cambiar tema sin
 vim.keymap.set("n", "<leader>up", ":ThemePreview<CR>", { desc = "Previsualizar temas en vivo" })
 EOF
 
-echo "[+] Generando plugins/colors.lua..."
-
+# Write plugins/colors.lua
 cat > ~/.config/nvim/lua/plugins/colors.lua <<'EOF'
 return {
   {
@@ -208,6 +217,6 @@ return {
 }
 EOF
 
-echo "[✅] Instalación completed."
+echo "[✅] Installation complete."
 echo "[🚀] Open Neovim and run :Lazy sync to install all plugins."
-echo "[🎨] Usa :ThemePicker to change theme or :ThemePreview to preview themes."
+echo "[🎨] Use :ThemePicker or :ThemePreview to change themes."
